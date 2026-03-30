@@ -157,7 +157,7 @@ class LinuxDoBrowser:
         # 验证登录状态，增加等待
         try:
             # 增加显式等待，最多等待 15 秒
-            user_ele = self.page.wait.ele_display("@id=current-user", timeout=15)
+            user_ele = self.page.wait.ele_displayed("@id=current-user", timeout=15)
         except Exception as e:
             logger.warning(f"Cookie 登录验证异常: {str(e)}")
             # 如果异常了，尝试继续检查 HTML 中是否有头像
