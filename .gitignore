@@ -1,0 +1,10 @@
+checkin_log.txt
+.env
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+.gemini/
+.agent/
+*.log
+.history/*

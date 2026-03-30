@@ -48,6 +48,20 @@ os.environ.pop("DYLD_LIBRARY_PATH", None)
 USERNAME = os.environ.get("LINUXDO_USERNAME")
 PASSWORD = os.environ.get("LINUXDO_PASSWORD")
 COOKIES = os.environ.get("LINUXDO_COOKIES", "").strip()  # 手动设置的 Cookie 字符串，优先使用
+
+# 优先从本地文件读取，方便用户一键更新
+if os.path.exists("cookies.txt"):
+    try:
+        with open("cookies.txt", "r", encoding="utf-8") as f:
+            file_cookies = f.read().strip()
+            # 兼容有些用户复制时带引号的情况
+            file_cookies = file_cookies.strip("'").strip('"')
+            if file_cookies:
+                COOKIES = file_cookies
+                logger.info("已优先从本地 cookies.txt 加载最新凭证")
+    except Exception as e:
+        logger.error(f"读取 cookies.txt 失败: {str(e)}")
+
 BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in [
     "false",
     "0",
