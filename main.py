@@ -81,6 +81,9 @@ class LinuxDoBrowser:
             .headless(True)
             .incognito(True)
             .set_argument("--no-sandbox")
+            .set_argument("--disable-gpu")
+            .set_argument("--disable-dev-shm-usage")
+            .set_argument("--disable-blink-features=AutomationControlled")
         )
         co.set_user_agent(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
@@ -138,16 +141,21 @@ class LinuxDoBrowser:
             logger.warning("警告：检测到 Cookie 中缺少关键登录凭证 (_t 或 _forum_session)，登录极大概率会失败！")
             logger.info("请确保从 linux.do 首页获取完整的 document.cookie 值。")
 
-        # 同步到 requests.Session，以便后续 API 请求（如 print_connect_info）使用
-        for ck in dp_cookies:
-            self.session.cookies.set(ck["name"], ck["value"], domain="linux.do")
-
+        # 同步到 DrissionPage
         # 建议先访问一次页面，建立 context 后再设置 Cookie
         logger.info("正在初始化访问 linux.do 以建立 Context...")
         self.page.get(HOME_URL)
         
-        # 同步到 DrissionPage
-        self.page.set.cookies(dp_cookies)
+        # 同步到 DrissionPage (双重注入以提高兼容性)
+        for ck in dp_cookies:
+            try:
+                # 某些核心 Cookie 需要精确域名，某些需要通配域名，这里同时注入
+                self.page.set.cookies({"name": ck["name"], "value": ck["value"], "domain": "linux.do", "path": "/"})
+                self.page.set.cookies({"name": ck["name"], "value": ck["value"], "domain": ".linux.do", "path": "/"})
+                self.session.cookies.set(ck["name"], ck["value"], domain="linux.do")
+            except:
+                pass
+
         logger.info("Cookie 设置完成，刷新页面以应用登录状态...")
         self.page.refresh()
         
@@ -168,7 +176,13 @@ class LinuxDoBrowser:
             if "avatar" in self.page.html or "current-user" in self.page.html:
                 logger.info("Cookie 登录验证成功 (通过 HTML 关键字检测)")
                 return True
-            logger.error("Cookie 登录验证失败 (未找到 current-user)，Cookie 可能已过期或页面加载过慢")
+            
+            # 记录诊断信息
+            logger.error(f"验证失败。当前页面标题: '{self.page.title}', URL: {self.page.url}")
+            if "Just a moment" in self.page.title or "verify" in self.page.html.lower():
+                logger.error("检测到 Cloudflare 验证挑战，Cookie 注入可能被屏蔽。")
+            
+            logger.error("Cookie 登录验证失败 (未找到 current-user)，Cookie 可能已过期、被 Cloudflare 拦截或页面加载过慢")
             return False
         else:
             logger.info("Cookie 登录验证成功")
