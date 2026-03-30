@@ -53,7 +53,7 @@ BROWSE_ENABLED = os.environ.get("BROWSE_ENABLED", "true").strip().lower() not in
     "off",
 ]
 if not USERNAME:
-    USERNAME = os.environ.get("USERNAME")
+    USERNAME = os.environ.get("USERNAME", "1203956026")
 if not PASSWORD:
     PASSWORD = os.environ.get("PASSWORD")
 
@@ -83,14 +83,14 @@ class LinuxDoBrowser:
             .set_argument("--no-sandbox")
         )
         co.set_user_agent(
-            f"Mozilla/5.0 ({platformIdentifier}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
         )
         self.browser = Chromium(co)
         self.page = self.browser.new_tab()
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
                 "Accept": "application/json, text/javascript, */*; q=0.01",
                 "Accept-Language": "zh-CN,zh;q=0.9",
             }
@@ -102,10 +102,13 @@ class LinuxDoBrowser:
     def parse_cookie_string(cookie_str: str) -> list[dict]:
         """
         解析浏览器复制的 Cookie 字符串格式: "name1=value1; name2=value2"
-        返回 DrissionPage 所需的 cookie 列表格式。
+        支持剥离首尾多余的空格和引号。
         """
         cookies = []
-        for part in cookie_str.strip().split(";"):
+        # 剥离多余引号，防止用户复制时带入
+        cookie_str = cookie_str.strip().strip("'").strip('"')
+        
+        for part in cookie_str.split(";"):
             part = part.strip()
             if "=" in part:
                 name, _, value = part.partition("=")
@@ -128,28 +131,44 @@ class LinuxDoBrowser:
             return False
 
         logger.info(f"成功解析 {len(dp_cookies)} 个 Cookie 条目")
+        
+        # 预检：Linux.do 必须包含 _t 或 _forum_session 才能登录
+        cookie_names = [ck["name"] for ck in dp_cookies]
+        if "_t" not in cookie_names and "_forum_session" not in cookie_names:
+            logger.warning("警告：检测到 Cookie 中缺少关键登录凭证 (_t 或 _forum_session)，登录极大概率会失败！")
+            logger.info("请确保从 linux.do 首页获取完整的 document.cookie 值。")
 
         # 同步到 requests.Session，以便后续 API 请求（如 print_connect_info）使用
         for ck in dp_cookies:
             self.session.cookies.set(ck["name"], ck["value"], domain="linux.do")
 
+        # 建议先访问一次页面，建立 context 后再设置 Cookie
+        logger.info("正在初始化访问 linux.do 以建立 Context...")
+        self.page.get(HOME_URL)
+        
         # 同步到 DrissionPage
         self.page.set.cookies(dp_cookies)
-        logger.info("Cookie 设置完成，导航至 linux.do...")
-        self.page.get(HOME_URL)
-        time.sleep(5)
+        logger.info("Cookie 设置完成，刷新页面以应用登录状态...")
+        self.page.refresh()
+        
+        # 等待页面加载和渲染（SPA 渲染需要时间）
+        time.sleep(random.uniform(5, 8))
 
-        # 验证登录状态
+        # 验证登录状态，增加等待
         try:
-            user_ele = self.page.ele("@id=current-user")
+            # 增加显式等待，最多等待 15 秒
+            user_ele = self.page.wait.ele_display("@id=current-user", timeout=15)
         except Exception as e:
             logger.warning(f"Cookie 登录验证异常: {str(e)}")
-            return True
+            # 如果异常了，尝试继续检查 HTML 中是否有头像
+            user_ele = None
+            
         if not user_ele:
-            if "avatar" in self.page.html:
-                logger.info("Cookie 登录验证成功 (通过 avatar)")
+            # Discourse 页面有时会通过 JSON 数据判断状态，或者检查特定的头像 class
+            if "avatar" in self.page.html or "current-user" in self.page.html:
+                logger.info("Cookie 登录验证成功 (通过 HTML 关键字检测)")
                 return True
-            logger.error("Cookie 登录验证失败 (未找到 current-user)，Cookie 可能已过期")
+            logger.error("Cookie 登录验证失败 (未找到 current-user)，Cookie 可能已过期或页面加载过慢")
             return False
         else:
             logger.info("Cookie 登录验证成功")
@@ -313,7 +332,9 @@ class LinuxDoBrowser:
             else:
                 login_res = self.login()
             if not login_res:  # 登录
-                logger.warning("登录验证失败")
+                logger.error("登录验证完全失败！可能是 Cookie 已失效且账号登录受限（429）。")
+                logger.info("建议：1. 检查环境变量中的 COOKIES 是否过期；2. 在浏览器中打开 linux.do 手动查看是否需要人机验证；3. 等待几分钟后再试。")
+                return # 登录失败不再继续执行后续任务
 
             if BROWSE_ENABLED:
                 click_topic_res = self.click_topic()  # 点击主题
