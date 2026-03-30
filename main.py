@@ -7,6 +7,7 @@ import os
 import random
 import time
 import functools
+from urllib.parse import unquote
 from loguru import logger
 from DrissionPage import ChromiumOptions, Chromium
 from tabulate import tabulate
@@ -115,10 +116,12 @@ class LinuxDoBrowser:
             part = part.strip()
             if "=" in part:
                 name, _, value = part.partition("=")
+                # 如果值包含 URL 编码字符，尝试解码后再注入
+                value = unquote(value.strip())
                 cookies.append(
                     {
                         "name": name.strip(),
-                        "value": value.strip(),
+                        "value": value,
                         "domain": ".linux.do",
                         "path": "/",
                     }
@@ -179,6 +182,17 @@ class LinuxDoBrowser:
             
             # 记录诊断信息
             logger.error(f"验证失败。当前页面标题: '{self.page.title}', URL: {self.page.url}")
+            
+            # 增加 API 级别后验 (Linux.do / Discourse 专用鉴权接口)
+            try:
+                logger.info("尝试 API 级别验证登录态...")
+                resp = self.session.get("https://linux.do/u/current-user.json")
+                if resp.status_code == 200 and "current_user" in resp.text:
+                    logger.success("Cookie 登录验证成功 (通过后验 API 读取)")
+                    return True
+            except:
+                pass
+
             if "Just a moment" in self.page.title or "verify" in self.page.html.lower():
                 logger.error("检测到 Cloudflare 验证挑战，Cookie 注入可能被屏蔽。")
             
